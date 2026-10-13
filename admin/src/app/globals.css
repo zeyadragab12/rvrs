@@ -1,0 +1,47 @@
+@import "tailwindcss";
+
+/* RVRS "Smash Street" tokens, shared with the mobile app. Proposed colours, not confirmed brand values. */
+:root {
+  --rv-orange: #f15a24;
+  --rv-black: #111111;
+  --rv-cream: #f7f0e5;
+  --rv-yellow: #ffd52a;
+  --rv-white: #ffffff;
+  --rv-gray: #5f5a52;
+  --rv-border: #ded7cc;
+  --rv-danger: #b3261e;
+  --rv-success: #1e7a46;
+  color-scheme: light;
+}
+
+@theme inline {
+  --color-orange: var(--rv-orange);
+  --color-ink: var(--rv-black);
+  --color-cream: var(--rv-cream);
+  --color-sun: var(--rv-yellow);
+  --color-paper: var(--rv-white);
+  --color-muted: var(--rv-gray);
+  --color-line: var(--rv-border);
+  --color-danger: var(--rv-danger);
+  --color-ok: var(--rv-success);
+  --font-display: var(--font-archivo);
+  --font-sans: var(--font-dm-sans);
+}
+
+body {
+  background: var(--rv-cream);
+  color: var(--rv-black);
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+}
+
+:focus-visible {
+  outline: 3px solid var(--rv-orange);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+    transition: none !important;
+  }
+}

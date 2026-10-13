@@ -1,0 +1,56 @@
+{
+  "expo": {
+    "name": "RVRS",
+    "slug": "reactNative-tet",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "reactnativetet",
+    "userInterfaceStyle": "automatic",
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#F15A24",
+        "foregroundImage": "./assets/images/android-icon-foreground.png",
+        "backgroundImage": "./assets/images/android-icon-background.png",
+        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "output": "single",
+      "favicon": "./assets/images/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#F15A24",
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 220
+        }
+      ],
+      "expo-localization",
+      "expo-secure-store",
+      [
+        "expo-notifications",
+        {
+          "color": "#F15A24",
+          "defaultChannel": "orders",
+          "icon": "./assets/images/notification-icon.png"
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "RVRS uses your location to check that we deliver to you."
+        }
+      ],
+      "expo-video"
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    }
+  }
+}

@@ -1,0 +1,87 @@
+{
+  "note": "RVRS app intro. 96 BPM, 8 beats = 2 bars of 4 = 5.0 s. Bar lines at beats 0 and 4.",
+  "title": "RVRS \u00e2\u20ac\u201d app intro",
+  "duration": 5,
+  "fps": 60,
+  "bpm": 96,
+  "formats": [
+    "9x16"
+  ],
+  "music": {
+    "source": "synth",
+    "chords": [
+      "Am",
+      "F"
+    ],
+    "sections": [
+      {
+        "at": 0,
+        "kind": "intro"
+      },
+      {
+        "at": "pulse",
+        "kind": "drop"
+      }
+    ],
+    "accents": [
+      "pulse",
+      "end"
+    ]
+  },
+  "voiceover": null,
+  "marks": {
+    "dot": 0,
+    "draw": 1,
+    "ball": 3,
+    "pulse": 4,
+    "cover": 5,
+    "end": 6,
+    "done": 8
+  },
+  "sfx": [
+    {
+      "at": "dot",
+      "type": "pop",
+      "gain": 0.7,
+      "what": "white dot pops at frame 0"
+    },
+    {
+      "at": 1,
+      "to": 3,
+      "every": 0.25,
+      "type": "tick",
+      "gain": 0.3,
+      "what": "pen ticks while the logo draws itself"
+    },
+    {
+      "at": "pulse",
+      "type": "whoosh",
+      "gain": 0.45,
+      "what": "orange ball flies in, peaks on the hit"
+    },
+    {
+      "at": "pulse",
+      "type": "thump",
+      "gain": 0.7,
+      "what": "ball hits: logo turns orange, white flood starts"
+    },
+    {
+      "at": "cover",
+      "type": "pop",
+      "gain": 0.5,
+      "what": "flood fills the screen"
+    },
+    {
+      "at": "end",
+      "type": "thump",
+      "gain": 0.6,
+      "what": "final lock-up hit: logo kick + orange ring"
+    },
+    {
+      "at": 7,
+      "type": "pop",
+      "gain": 0.4,
+      "what": "logo settle kick"
+    }
+  ]
+}

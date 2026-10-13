@@ -1,0 +1,122 @@
+{
+ "round": "final",
+ "source": "renders/9x16.mp4",
+ "fps": 60.0,
+ "duration": 5.0,
+ "motion_peaks_s": [
+  2.42,
+  3.83,
+  4.35,
+  1.9,
+  0.47
+ ],
+ "longest_static": {
+  "seconds": 1.45,
+  "from_s": 0.53
+ },
+ "max_gap_between_visual_events": {
+  "seconds": 2.52,
+  "from_s": 0.0,
+  "rule": "something new every 2\u20134 s"
+ },
+ "near_blank_frames": [],
+ "loop_seam_jump": {
+  "value": 124.2,
+  "note": "typical hard cut 40\u201380; < 10 reads as continuous"
+ },
+ "sync": {
+  "cues": [
+   {
+    "t": 0.00013,
+    "type": "pop",
+    "what": "white dot pops at frame 0",
+    "visual_minus_audio_ms": 0
+   },
+   {
+    "t": 0.625,
+    "type": "tick",
+    "what": "pen ticks while the logo draws itself",
+    "visual_minus_audio_ms": -83
+   },
+   {
+    "t": 0.78128,
+    "type": "tick",
+    "what": "pen ticks while the logo draws itself",
+    "visual_minus_audio_ms": -150
+   },
+   {
+    "t": 0.93756,
+    "type": "tick",
+    "what": "pen ticks while the logo draws itself",
+    "visual_minus_audio_ms": -100
+   },
+   {
+    "t": 1.09384,
+    "type": "tick",
+    "what": "pen ticks while the logo draws itself",
+    "visual_minus_audio_ms": -67
+   },
+   {
+    "t": 1.25012,
+    "type": "tick",
+    "what": "pen ticks while the logo draws itself",
+    "visual_minus_audio_ms": -100
+   },
+   {
+    "t": 1.40634,
+    "type": "tick",
+    "what": "pen ticks while the logo draws itself",
+    "visual_minus_audio_ms": -133
+   },
+   {
+    "t": 1.56535,
+    "type": "tick",
+    "what": "pen ticks while the logo draws itself",
+    "visual_minus_audio_ms": -33
+   },
+   {
+    "t": 1.71878,
+    "type": "tick",
+    "what": "pen ticks while the logo draws itself",
+    "visual_minus_audio_ms": -50
+   },
+   {
+    "t": 2.5001,
+    "type": "whoosh",
+    "what": "orange ball flies in, peaks on the hit",
+    "visual_minus_audio_ms": 33
+   },
+   {
+    "t": 2.5001,
+    "type": "thump",
+    "what": "ball hits: logo turns orange, white flood starts",
+    "visual_minus_audio_ms": 33
+   },
+   {
+    "t": 3.12515,
+    "type": "pop",
+    "what": "flood fills the screen",
+    "visual_minus_audio_ms": -100
+   },
+   {
+    "t": 3.75012,
+    "type": "thump",
+    "what": "final lock-up hit: logo kick + orange ring",
+    "visual_minus_audio_ms": 17
+   },
+   {
+    "t": 4.37513,
+    "type": "pop",
+    "what": "logo settle kick",
+    "visual_minus_audio_ms": -17
+   }
+  ],
+  "hits_within_45ms": "4/5",
+  "hits_mean_abs_ms": 33.4,
+  "note": "positive = picture late. whoosh/riser build INTO the cue by design; ticks are texture. Visual hits should read ON the audio (|x| <= 45 ms)."
+ },
+ "loudness": {
+  "I": "-14.1 LUFS",
+  "Peak": "-1.4 dBFS"
+ }
+}

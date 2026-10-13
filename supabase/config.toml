@@ -1,0 +1,4 @@
+# Minimal Supabase CLI config. Run `supabase link --project-ref <ref>` before `supabase db push`.
+[functions.notify-order-status]
+# Callers are authenticated with the x-webhook-secret header (secret stored in Vault), not a JWT.
+verify_jwt = false
