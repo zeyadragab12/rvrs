@@ -1,11 +1,12 @@
 import { useEventListener } from "expo";
 import { useVideoPlayer, VideoView } from "expo-video";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Animated, Easing, Platform, Pressable, StyleSheet } from "react-native";
 
 const SOURCE = require("../../assets/videos/rvrs-intro.mp4");
 const BRAND_ORANGE = "#F15A24"; // same orange as the video's first frame, so there is no flash while it loads
 const OUTRO_MS = 700;
+const MAX_MS = 8000; // the clip is 5s
 
 /** Full-screen launch intro. Eases out (soft zoom + fade) when it ends, fails, or is tapped to skip, then calls onDone. */
 export function IntroVideo({ onDone }: { onDone: () => void }) {
@@ -31,6 +32,16 @@ export function IntroVideo({ onDone }: { onDone: () => void }) {
       if (finished) onDone();
     });
   };
+
+  // On web the setup callback runs before VideoView attaches its <video>, so that play() is a no-op.
+  // VideoView attaches in its own effect, which runs before this one, so play again here.
+  // The timer is a safety net in case the video never starts or never ends.
+  useEffect(() => {
+    player.play();
+    const timer = setTimeout(leave, MAX_MS);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [player]);
 
   useEventListener(player, "playToEnd", leave);
   useEventListener(player, "statusChange", ({ status }) => {
