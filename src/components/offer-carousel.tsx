@@ -4,6 +4,7 @@ import { Text, useWindowDimensions, View } from "react-native";
 import Animated, { Extrapolation, interpolate, useAnimatedScrollHandler, useAnimatedStyle, useSharedValue, type SharedValue } from "react-native-reanimated";
 import { PressableScale } from "@/components/ui/pressable-scale";
 import { useI18n } from "@/i18n";
+import { useLoyalty } from "@/lib/loyalty";
 import { useMenu } from "@/lib/menu";
 import { offers, type Offer } from "@/lib/offers";
 import { colors, fonts, radius, shadow } from "@/theme/tokens";
@@ -14,6 +15,7 @@ const SIDE = 20;
 function OfferCard({ offer, width }: { offer: Offer; width: number }) {
   const { locale } = useI18n();
   const menu = useMenu();
+  const { signedIn } = useLoyalty();
   const categoryId = offer.category ? menu.data?.categories.find((c) => c.name_en.trim().toLowerCase() === offer.category)?.id : undefined;
   const ar = locale === "ar";
   const tag = ar ? offer.tag_ar : offer.tag_en;
@@ -25,7 +27,7 @@ function OfferCard({ offer, width }: { offer: Offer; width: number }) {
     <PressableScale
       accessibilityRole="button"
       accessibilityLabel={`${tag}. ${title.replace("\n", " ")}. ${cta}`}
-      onPress={() => router.push(categoryId ? { pathname: "/menu", params: { category: categoryId } } : "/menu")}
+      onPress={() => router.navigate(offer.guestRoute && !signedIn ? offer.guestRoute : categoryId ? { pathname: "/menu", params: { category: categoryId } } : "/menu")}
       scaleTo={0.97}
       style={[{ width, minHeight: 196, backgroundColor: offer.bg, borderRadius: radius.xl, padding: 22, justifyContent: "space-between", overflow: "hidden" }, dark ? shadow.lift : shadow.card]}
     >

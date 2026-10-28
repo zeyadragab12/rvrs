@@ -2,7 +2,7 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import { useQuery } from "@tanstack/react-query";
 import { router, useLocalSearchParams } from "expo-router";
 import { useEffect } from "react";
-import { ScrollView, Text, View } from "react-native";
+import { Linking, ScrollView, Text, View } from "react-native";
 import Animated, { Easing, FadeIn, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Button } from "@/components/button";
@@ -12,6 +12,7 @@ import { Reveal } from "@/components/ui/reveal";
 import { statusLabel, useI18n } from "@/i18n";
 import { getGuestToken } from "@/lib/guest-orders";
 import { getGuestOrder } from "@/lib/orders";
+import { useBranchStatus } from "@/lib/menu";
 import { useSession } from "@/lib/session";
 import { supabase } from "@/lib/supabase";
 import { colors, fonts, radius, shadow } from "@/theme/tokens";
@@ -46,6 +47,8 @@ export default function OrderScreen() {
   const { t, price } = useI18n();
 
   const { user } = useSession();
+  const { branch } = useBranchStatus();
+  const phone = branch?.phone?.replace(/[^+\d]/g, "");
 
   const q = useQuery({
     queryKey: ["order", id, user?.id],
@@ -182,6 +185,14 @@ export default function OrderScreen() {
             </Reveal>
 
             <Text style={{ fontFamily: fonts.body, fontSize: 12, color: colors.gray }}>{t.saveOrderNote}</Text>
+            {!!phone && (
+              <Reveal index={3}>
+                <Card style={{ gap: 12 }}>
+                  <Text style={{ fontFamily: fonts.medium, fontSize: 14, color: colors.gray }}>{t.supportHint}</Text>
+                  <Button label={t.support} variant="ghost" block onPress={() => Linking.openURL(`tel:${phone}`)} />
+                </Card>
+              </Reveal>
+            )}
             <Button label={t.backToMenu} variant="orange" block onPress={() => router.dismissTo("/menu")} />
           </>
         )}

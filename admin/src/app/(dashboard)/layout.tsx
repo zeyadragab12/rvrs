@@ -15,6 +15,7 @@ const NAV: { href: string; label: string; roles?: Role[] }[] = [
   { href: "/promotions", label: "Promotions", roles: ["owner"] },
   { href: "/reports", label: "Reports", roles: ["owner", "branch_manager"] },
   { href: "/staff", label: "Staff", roles: ["owner"] },
+  { href: "/settings", label: "Settings", roles: ["owner"] },
   { href: "/audit", label: "Audit log", roles: ["owner"] },
 ];
 
@@ -59,7 +60,7 @@ function Shell({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex min-h-screen flex-col md:flex-row">
-      <aside className="flex flex-row items-center gap-2 overflow-x-auto bg-ink p-3 text-cream md:w-56 md:flex-col md:items-stretch md:gap-1 md:p-4">
+      <aside className="sticky top-0 z-10 flex flex-row items-center gap-2 overflow-x-auto bg-ink p-3 text-cream md:h-screen md:w-56 md:shrink-0 md:flex-col md:items-stretch md:gap-1 md:self-start md:overflow-y-auto md:p-4">
         <p className="font-display text-3xl text-orange md:mb-4">RVRS</p>
         <nav aria-label="Main" className="flex flex-1 flex-row gap-1 md:flex-col">
           {links.map((l) => {

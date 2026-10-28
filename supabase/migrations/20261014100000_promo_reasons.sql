@@ -1,0 +1,262 @@
+-- Promo codes: say WHY a code was refused, and let the app check a code before the customer places the order.
+-- Reason codes: empty, not_found, not_started, expired, wrong_branch, used_up, min_order, not_applicable.
+-- A switched-off code reports not_found, so customers cannot tell it exists.
+
+create function private.promo_check(p_code text, p_branch uuid, p_lines jsonb) returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+declare
+  promo public.promotions; l jsonb; subtotal numeric := 0; eligible numeric := 0; disc numeric;
+begin
+  select * into promo from public.promotions where code = upper(btrim(p_code));
+  if not found or not promo.is_active then
+    return jsonb_build_object('ok', false, 'reason', 'not_found', 'message', 'promo code is not valid: no such code');
+  end if;
+  if promo.starts_at is not null and promo.starts_at > now() then
+    return jsonb_build_object('ok', false, 'reason', 'not_started',
+      'message', 'promo code is not valid: it starts on ' || to_char(promo.starts_at at time zone 'Africa/Cairo', 'YYYY-MM-DD'),
+      'date', to_char(promo.starts_at at time zone 'Africa/Cairo', 'YYYY-MM-DD'));
+  end if;
+  if promo.ends_at is not null and promo.ends_at < now() then
+    return jsonb_build_object('ok', false, 'reason', 'expired', 'message', 'promo code is not valid: it has expired');
+  end if;
+  if promo.branch_ids is not null and not (p_branch = any(promo.branch_ids)) then
+    return jsonb_build_object('ok', false, 'reason', 'wrong_branch', 'message', 'promo code is not valid: it does not apply at this branch');
+  end if;
+  if promo.usage_limit is not null and promo.used_count >= promo.usage_limit then
+    return jsonb_build_object('ok', false, 'reason', 'used_up', 'message', 'promo code has been fully used');
+  end if;
+  select coalesce(sum((x->>'line_total')::numeric), 0) into subtotal from jsonb_array_elements(p_lines) x;
+  if subtotal < promo.min_order then
+    return jsonb_build_object('ok', false, 'reason', 'min_order', 'min_order', promo.min_order,
+      'message', 'minimum order for this code is ' || promo.min_order || ' EGP');
+  end if;
+  for l in select * from jsonb_array_elements(p_lines) loop
+    if (promo.product_ids is null and promo.category_ids is null)
+       or ((l->>'product_id')::uuid = any(coalesce(promo.product_ids, '{}')))
+       or ((l->>'category_id')::uuid = any(coalesce(promo.category_ids, '{}'))) then
+      eligible := eligible + (l->>'line_total')::numeric;
+    end if;
+  end loop;
+  if eligible = 0 then
+    return jsonb_build_object('ok', false, 'reason', 'not_applicable', 'message', 'promo code does not apply to these items');
+  end if;
+  disc := case promo.discount_type when 'fixed' then least(promo.discount_value, eligible)
+          else round(eligible * promo.discount_value / 100, 2) end;
+  return jsonb_build_object('ok', true, 'promo_id', promo.id, 'discount', disc, 'subtotal', subtotal);
+end $$;
+
+-- Lets the app tell the customer straight away whether a code will work for this cart and branch. Nothing is used up.
+create function public.check_promo(p_code text, p_branch_id uuid, p_items jsonb) returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+declare
+  it jsonb; prod public.products; bps public.branch_product_settings; unit numeric; delta numeric; qty int;
+  opt_ids uuid[]; lines jsonb := '[]'::jsonb;
+begin
+  if coalesce(btrim(p_code), '') = '' then
+    return jsonb_build_object('ok', false, 'reason', 'empty', 'message', 'enter a promo code');
+  end if;
+  if jsonb_typeof(p_items) <> 'array' or jsonb_array_length(p_items) not between 1 and 50 then
+    return jsonb_build_object('ok', false, 'reason', 'not_applicable', 'message', 'promo code does not apply to these items');
+  end if;
+  for it in select * from jsonb_array_elements(p_items) loop
+    qty := least(greatest(coalesce((it->>'quantity')::int, 1), 1), 50);
+    select * into prod from public.products where id = (it->>'product_id')::uuid and is_published and not is_archived and is_available;
+    continue when not found;
+    select * into bps from public.branch_product_settings where branch_id = p_branch_id and product_id = prod.id;
+    unit := coalesce(bps.price_override, prod.base_price);
+    opt_ids := array(select distinct x::uuid from jsonb_array_elements_text(coalesce(it->'option_ids', '[]'::jsonb)) x);
+    select coalesce(sum(o.price_delta), 0) into delta from public.options o join public.option_groups og on og.id = o.group_id
+      where og.product_id = prod.id and o.is_available and o.id = any(opt_ids);
+    lines := lines || jsonb_build_object('product_id', prod.id, 'category_id', prod.category_id, 'line_total', (unit + delta) * qty);
+  end loop;
+  return private.promo_check(p_code, p_branch_id, lines);
+end $$;
+revoke execute on function public.check_promo(text, uuid, jsonb) from public;
+grant execute on function public.check_promo(text, uuid, jsonb) to anon, authenticated;
+
+create or replace function public.create_order(
+  p_branch_id uuid,
+  p_method public.fulfillment_method,
+  p_items jsonb,
+  p_customer_name text,
+  p_customer_phone text,
+  p_payment_method public.payment_method,
+  p_idempotency_key text,
+  p_address jsonb default null,
+  p_promo_code text default null,
+  p_notes text default null,
+  p_use_reward boolean default false
+) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare
+  uid uuid := (select auth.uid());
+  br public.branches;
+  existing public.orders;
+  it jsonb; pid uuid; qty int; prod public.products; bps public.branch_product_settings;
+  unit numeric(10,2); delta numeric(10,2); n int; c int; g public.option_groups;
+  opt_ids uuid[]; opt_snapshot jsonb; lines jsonb := '[]'::jsonb; line_total numeric(10,2);
+  subtotal numeric(10,2) := 0; discount numeric(10,2) := 0; fee numeric(10,2) := 0; min_order numeric(10,2) := 0;
+  promo_id uuid;
+  zone public.delivery_zones; pt extensions.geometry; addr jsonb;
+  new_id uuid; new_number text; guest_token text; guest_hash text; total numeric(10,2);
+  cash_ok boolean;
+  done_orders int; reward_cap numeric(10,2); chk jsonb;
+begin
+  if coalesce(length(p_idempotency_key), 0) not between 8 and 100 then
+    raise exception 'invalid idempotency key' using errcode = '22023';
+  end if;
+  if uid is not null and private.my_role() is null then
+    raise exception 'account is not active' using errcode = '42501';
+  end if;
+
+  -- duplicate submission: return the original order
+  select * into existing from public.orders where idempotency_key = p_idempotency_key;
+  if found then
+    if existing.user_id is distinct from uid then
+      raise exception 'idempotency key already used' using errcode = '23505';
+    end if;
+    return jsonb_build_object('order_id', existing.id, 'order_number', existing.order_number,
+      'total', existing.total, 'status', existing.status, 'guest_token', null, 'duplicate', true);
+  end if;
+
+  if coalesce(btrim(p_customer_name), '') = '' or length(p_customer_name) > 100 then
+    raise exception 'customer name is required' using errcode = '22023';
+  end if;
+  if coalesce(p_customer_phone, '') !~ '^\+?[0-9 ]{7,15}$' then
+    raise exception 'a valid phone number is required' using errcode = '22023';
+  end if;
+  if length(coalesce(p_notes, '')) > 500 then raise exception 'notes too long' using errcode = '22023'; end if;
+
+  select * into br from public.branches where id = p_branch_id and is_active;
+  if not found then raise exception 'branch not available' using errcode = '22023'; end if;
+  if (p_method = 'delivery' and not br.delivery_enabled) or (p_method = 'pickup' and not br.pickup_enabled) then
+    raise exception 'this branch does not offer %', p_method using errcode = '22023';
+  end if;
+  if exists (select 1 from public.branch_closures bc where bc.branch_id = p_branch_id and now() between bc.starts_at and bc.ends_at) then
+    raise exception 'branch is closed right now' using errcode = '22023';
+  end if;
+
+  -- payment method must be enabled by the restaurant
+  if p_payment_method = 'cash' then
+    select coalesce((select (value)::text::boolean from public.app_settings
+      where key = case when p_method = 'delivery' then 'payments.cash_on_delivery' else 'payments.cash_on_pickup' end), false) into cash_ok;
+    if not cash_ok then raise exception 'cash is not accepted for this order type' using errcode = '22023'; end if;
+  else
+    if not coalesce((select (value)::text::boolean from public.app_settings where key = 'payments.card_enabled'), false) then
+      raise exception 'card payment is not enabled' using errcode = '22023';
+    end if;
+  end if;
+
+  if jsonb_typeof(p_items) <> 'array' or jsonb_array_length(p_items) not between 1 and 50 then
+    raise exception 'cart must contain 1 to 50 items' using errcode = '22023';
+  end if;
+
+  for it in select * from jsonb_array_elements(p_items) loop
+    pid := (it->>'product_id')::uuid;
+    qty := (it->>'quantity')::int;
+    if qty is null or qty not between 1 and 50 then raise exception 'invalid quantity' using errcode = '22023'; end if;
+    select * into prod from public.products where id = pid and is_published and not is_archived and is_available;
+    if not found then raise exception 'product unavailable' using errcode = '22023'; end if;
+    select * into bps from public.branch_product_settings where branch_id = p_branch_id and product_id = pid;
+    if found and not bps.is_available then raise exception '% is unavailable at this branch', prod.name_en using errcode = '22023'; end if;
+    unit := coalesce(bps.price_override, prod.base_price);
+
+    opt_ids := array(select distinct x::uuid from jsonb_array_elements_text(coalesce(it->'option_ids', '[]'::jsonb)) x);
+    select count(*) into n from public.options o join public.option_groups og on og.id = o.group_id
+      where og.product_id = pid and o.is_available and o.id = any(opt_ids);
+    if n <> coalesce(array_length(opt_ids, 1), 0) then
+      raise exception 'invalid or unavailable option for %', prod.name_en using errcode = '22023';
+    end if;
+    for g in select * from public.option_groups where product_id = pid loop
+      select count(*) into c from public.options o where o.group_id = g.id and o.id = any(opt_ids);
+      if c > g.max_select or c < greatest(g.min_select, case when g.is_required then 1 else 0 end) then
+        raise exception 'choose the right number of "%" for %', g.name_en, prod.name_en using errcode = '22023';
+      end if;
+    end loop;
+    select coalesce(sum(o.price_delta), 0),
+           coalesce(jsonb_agg(jsonb_build_object('id', o.id, 'group', og.name_en, 'name', o.name_en, 'price_delta', o.price_delta)
+                    order by og.sort_order, o.sort_order), '[]'::jsonb)
+      into delta, opt_snapshot
+      from public.options o join public.option_groups og on og.id = o.group_id
+      where og.product_id = pid and o.id = any(opt_ids);
+
+    line_total := (unit + delta) * qty;
+    subtotal := subtotal + line_total;
+    lines := lines || jsonb_build_object('product_id', pid, 'category_id', prod.category_id, 'name', prod.name_en,
+      'unit_price', unit + delta, 'quantity', qty, 'options', opt_snapshot,
+      'notes', left(it->>'notes', 300), 'line_total', line_total);
+  end loop;
+
+  -- delivery zone and fee
+  if p_method = 'delivery' then
+    if p_address is null or coalesce(btrim(p_address->>'address_line'), '') = '' or p_address->>'lat' is null or p_address->>'lng' is null then
+      raise exception 'delivery address with location is required' using errcode = '22023';
+    end if;
+    -- The app writes "Building X, Floor Y, Landmark: Z" into notes. All three parts are required for delivery.
+    if coalesce(p_address->>'notes', '') !~ '^Building\s+\S.*, Floor\s+\S.*, Landmark:\s+\S' then
+      raise exception 'building, floor and landmark are required for delivery' using errcode = '22023';
+    end if;
+    pt := extensions.st_setsrid(extensions.st_makepoint((p_address->>'lng')::float8, (p_address->>'lat')::float8), 4326);
+    select * into zone from public.delivery_zones
+      where branch_id = p_branch_id and is_active and extensions.st_covers(geom, pt)
+      order by delivery_fee limit 1;
+    if not found then raise exception 'address is outside this branch delivery area' using errcode = '22023'; end if;
+    fee := zone.delivery_fee; min_order := zone.min_order;
+    if subtotal < min_order then raise exception 'minimum order for this area is % EGP', min_order using errcode = '22023'; end if;
+    addr := jsonb_build_object('address_line', left(p_address->>'address_line', 300), 'notes', left(p_address->>'notes', 300),
+      'lat', (p_address->>'lat')::float8, 'lng', (p_address->>'lng')::float8, 'zone', zone.name);
+  end if;
+
+  -- Smash Card reward: the order after ten completed orders is free, up to a cap. The server decides, never the app.
+  if p_use_reward then
+    if uid is null then raise exception 'sign in to use your reward' using errcode = '42501'; end if;
+    if coalesce(btrim(p_promo_code), '') <> '' then
+      raise exception 'a reward cannot be combined with a promo code' using errcode = '22023';
+    end if;
+    select count(*) into done_orders from public.orders where user_id = uid and status = 'completed';
+    if done_orders % 11 <> 10 then raise exception 'no reward available yet' using errcode = '22023'; end if;
+    if exists (select 1 from public.orders where user_id = uid and loyalty_reward
+               and status not in ('completed', 'rejected', 'cancelled')) then
+      raise exception 'your reward is already being used on another order' using errcode = '22023';
+    end if;
+    reward_cap := coalesce((select (value)::text::numeric from public.app_settings where key = 'loyalty.reward_cap'), 200);
+    discount := least(subtotal, reward_cap);
+  end if;
+
+  -- promotion: the same check the app runs before checkout, so the reason given here matches
+  if not p_use_reward and coalesce(btrim(p_promo_code), '') <> '' then
+    chk := private.promo_check(p_promo_code, p_branch_id, lines);
+    if not (chk->>'ok')::boolean then
+      raise exception '%', chk->>'message' using errcode = '22023', hint = chk->>'reason';
+    end if;
+    promo_id := (chk->>'promo_id')::uuid;
+    discount := (chk->>'discount')::numeric;
+    -- the check above is a read; this makes the last use atomic so two orders cannot both take it
+    update public.promotions set used_count = used_count + 1
+      where id = promo_id and (usage_limit is null or used_count < usage_limit);
+    if not found then raise exception 'promo code has been fully used' using errcode = '22023', hint = 'used_up'; end if;
+  end if;
+
+  total := subtotal - discount + fee;
+
+  if uid is null then
+    guest_token := replace(gen_random_uuid()::text || gen_random_uuid()::text, '-', '');
+    guest_hash := encode(sha256(convert_to(guest_token, 'utf8')), 'hex');
+  end if;
+
+  insert into public.orders (user_id, guest_token_hash, customer_name, customer_phone, branch_id, method, address_snapshot,
+    subtotal, discount, delivery_fee, total, promotion_id, payment_method, notes, idempotency_key, loyalty_reward)
+  values (uid, guest_hash, btrim(p_customer_name), btrim(p_customer_phone), p_branch_id, p_method, addr,
+    subtotal, discount, fee, total, promo_id, p_payment_method, p_notes, p_idempotency_key, p_use_reward)
+  returning id, order_number into new_id, new_number;
+
+  insert into public.order_items (order_id, product_id, product_name, unit_price, quantity, options, notes, line_total)
+  select new_id, (x->>'product_id')::uuid, x->>'name', (x->>'unit_price')::numeric, (x->>'quantity')::int,
+         x->'options', x->>'notes', (x->>'line_total')::numeric
+  from jsonb_array_elements(lines) x;
+
+  insert into public.order_status_history (order_id, from_status, to_status, actor_id) values (new_id, null, 'pending', uid);
+
+  return jsonb_build_object('order_id', new_id, 'order_number', new_number, 'total', total,
+    'status', 'pending', 'guest_token', guest_token, 'duplicate', false);
+end $$;

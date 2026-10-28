@@ -1,26 +1,24 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { router } from "expo-router";
 import { ScrollView, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { BranchPill, BranchSheet, useBranchPicker } from "@/components/branch-picker";
 import { CartButton } from "@/components/cart-button";
 import { ClosedBanner } from "@/components/closed-banner";
-import { LoyaltyCard } from "@/components/loyalty-card";
+import { LoyaltyButton } from "@/components/loyalty-popup";
 import { ModeToggle } from "@/components/mode-toggle";
 import { OfferCarousel } from "@/components/offer-carousel";
 import { OrderAgain } from "@/components/order-again";
 import { FeatureSlider } from "@/components/feature-slider";
 import { ProductRail } from "@/components/product-rail";
 import { ErrorState, ProductSkeletons } from "@/components/states";
-import { PressableScale } from "@/components/ui/pressable-scale";
 import { Reveal } from "@/components/ui/reveal";
 import { Wordmark } from "@/components/wordmark";
 import { useI18n } from "@/i18n";
 import { HOME_CATEGORIES, RECOMMENDED_PRODUCTS, useBranchStatus, useMenu } from "@/lib/menu";
-import { colors, fonts, radius, shadow, tabBarSpace } from "@/theme/tokens";
+import { colors, fonts, tabBarSpace } from "@/theme/tokens";
 
 export default function Home() {
-  const { t, pick } = useI18n();
+  const { t } = useI18n();
   const menu = useMenu();
   const { status } = useBranchStatus();
   const picker = useBranchPicker();
@@ -39,7 +37,10 @@ export default function Home() {
       <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: tabBarSpace + 16, gap: 24 }} showsVerticalScrollIndicator={false}>
         <Reveal index={0} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
           <Wordmark />
-          <CartButton />
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+            <LoyaltyButton />
+            <CartButton />
+          </View>
         </Reveal>
 
         <Reveal index={1} style={{ gap: 12 }}>
@@ -67,38 +68,11 @@ export default function Home() {
           </Reveal>
         )}
 
-        <Reveal index={4}>
-          <LoyaltyCard />
-        </Reveal>
-
-        {menu.data && menu.data.categories.length > 0 && (
-          <Reveal index={4} style={{ gap: 12 }}>
-            <Text accessibilityRole="header" style={{ fontFamily: fonts.bold, fontSize: 22, letterSpacing: -0.4, color: colors.black }}>
-              {t.categories}
-            </Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingVertical: 8, paddingHorizontal: 20 }} style={{ marginHorizontal: -20 }}>
-              {menu.data.categories.map((c) => (
-                <PressableScale
-                  key={c.id}
-                  accessibilityRole="button"
-                  onPress={() => router.push({ pathname: "/menu", params: { category: c.id } })}
-                  style={[{ minHeight: 48, paddingHorizontal: 20, justifyContent: "center", borderRadius: radius.pill, backgroundColor: colors.white }, shadow.card]}
-                >
-                  <Text style={{ fontFamily: fonts.bold, fontSize: 15, color: colors.black }}>{pick(c.name_en, c.name_ar)}</Text>
-                </PressableScale>
-              ))}
-            </ScrollView>
-          </Reveal>
-        )}
-
         {menu.isPending && <ProductSkeletons count={2} />}
         {menu.isError && <ErrorState onRetry={() => menu.refetch()} />}
         {sections.map((s) => (
           <ProductRail key={s.category.id} category={s.category} products={s.products} />
         ))}
-        {menu.data?.products.some((p) => p.is_demo) && (
-          <Text style={{ fontFamily: fonts.body, fontSize: 12, color: colors.gray }}>{t.demoNote}</Text>
-        )}
 
         <Reveal index={9} style={{ paddingVertical: 8 }}>
           <Text style={{ fontFamily: fonts.display, fontSize: 30, lineHeight: 34, color: colors.orange, opacity: 0.9, textTransform: "uppercase" }}>

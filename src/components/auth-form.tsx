@@ -18,15 +18,18 @@ const makeSchema = (t: Strings, signUp: boolean) =>
   });
 type Values = z.infer<ReturnType<typeof makeSchema>>;
 
-export function AuthForm() {
+export type AuthNotice = { text: string; email: string };
+
+/** `notice` survives this form unmounting: a fresh sign-up briefly signs the user in before we sign them out again. */
+export function AuthForm({ notice, onNotice }: { notice?: AuthNotice | null; onNotice?: (n: AuthNotice | null) => void }) {
   const { t } = useI18n();
   const [signUp, setSignUp] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null);
+  const [message, setMessage] = useState<{ text: string; error: boolean } | null>(notice ? { text: notice.text, error: false } : null);
 
   const form = useForm<Values>({
     resolver: zodResolver(makeSchema(t, signUp)),
-    defaultValues: { name: "", email: "", password: "" },
+    defaultValues: { name: "", email: notice?.email ?? "", password: "" },
     mode: "onTouched",
   });
 
@@ -37,8 +40,15 @@ export function AuthForm() {
       if (signUp) {
         const { data, error } = await supabase.auth.signUp({ email: v.email, password: v.password, options: { data: { full_name: v.name } } });
         if (error) throw error;
-        if (!data.session) setMessage({ text: t.checkEmail, error: false });
+        // Success: send the customer to the sign-in form instead of leaving them signed in.
+        const text = data.session ? t.accountCreated : t.checkEmail;
+        onNotice?.({ text, email: v.email });
+        if (data.session) await supabase.auth.signOut();
+        setSignUp(false);
+        form.reset({ name: "", email: v.email, password: "" });
+        setMessage({ text, error: false });
       } else {
+        onNotice?.(null);
         const { error } = await supabase.auth.signInWithPassword({ email: v.email, password: v.password });
         if (error) throw error;
       }
@@ -68,6 +78,7 @@ export function AuthForm() {
         onPress={() => {
           setSignUp(!signUp);
           setMessage(null);
+          onNotice?.(null);
           form.clearErrors();
         }}
         style={{ minHeight: 48, alignItems: "center", justifyContent: "center" }}

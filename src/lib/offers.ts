@@ -13,6 +13,8 @@ export type Offer = {
   sub_ar: string;
   /** Lowercase English category name the offer opens in the menu. Leave out to open the full menu. */
   category?: string;
+  /** Where signed-out customers go instead of the menu, e.g. to sign in. */
+  guestRoute?: "/profile";
   cta_en: string;
   cta_ar: string;
 };
@@ -65,5 +67,20 @@ export const offers: Offer[] = [
     sub_ar: "طلبات الاستلام جاهزة لما توصل.",
     cta_en: "Order pickup",
     cta_ar: "اطلب للاستلام",
+  },
+  {
+    id: "smash",
+    icon: "restaurant",
+    bg: "#17130F",
+    fg: "#FBF7F1",
+    tag_en: "SMASH BURGERS",
+    tag_ar: "سماش برجر",
+    title_en: "Smashed hard.\nSeared right.",
+    title_ar: "سماش بحرفنة.\nمشوي صح.",
+    sub_en: "Crispy edges, juicy centre. Pick your favourite burger.",
+    sub_ar: "أطراف مقرمشة وقلب طري. اختر برجرك المفضل.",
+    category: "burgers",
+    cta_en: "See burgers",
+    cta_ar: "شاهد البرجر",
   },
 ];

@@ -4,9 +4,10 @@ import { router } from "expo-router";
 import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { ScrollView, Switch, Text, View } from "react-native";
+import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { z } from "zod";
-import { AuthForm } from "@/components/auth-form";
+import { AuthForm, type AuthNotice } from "@/components/auth-form";
 import { Button } from "@/components/button";
 import { FormField } from "@/components/form-field";
 import { Card } from "@/components/ui/card";
@@ -28,6 +29,7 @@ type Values = z.infer<ReturnType<typeof makeSchema>>;
 export default function Profile() {
   const { t } = useI18n();
   const { user, loading } = useSession();
+  const [notice, setNotice] = useState<AuthNotice | null>(null);
 
   return (
     <SafeAreaView edges={["top"]} style={{ flex: 1, backgroundColor: colors.cream }}>
@@ -35,7 +37,7 @@ export default function Profile() {
         <Text accessibilityRole="header" style={{ fontFamily: fonts.bold, fontSize: 32, letterSpacing: -0.8, color: colors.black }}>
           {t.tabProfile}
         </Text>
-        {!loading && (user ? <Account /> : <AuthForm />)}
+        {!loading && (user ? <Account /> : <AuthForm notice={notice} onNotice={setNotice} />)}
       </ScrollView>
     </SafeAreaView>
   );
@@ -49,7 +51,7 @@ function Account() {
   const addresses = useAddresses();
   const del = useDeleteAddress();
   const deletion = useRequestDeletion();
-  const [saved, setSaved] = useState(false);
+  const [flash, setFlash] = useState<"profile" | "prefs" | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const form = useForm<Values>({ resolver: zodResolver(makeSchema(t)), defaultValues: { name: "", phone: "" }, mode: "onTouched" });
@@ -57,15 +59,25 @@ function Account() {
     if (profile.data) form.reset({ name: profile.data.full_name ?? "", phone: profile.data.phone ?? "" });
   }, [profile.data, form]);
 
+  const [flashTick, setFlashTick] = useState(0);
+  useEffect(() => {
+    if (!flash) return;
+    const id = setTimeout(() => setFlash(null), 2500);
+    return () => clearTimeout(id);
+  }, [flash, flashTick]);
+  const showFlash = (kind: "profile" | "prefs") => {
+    setFlash(kind);
+    setFlashTick((n) => n + 1);
+  };
+
   const save = form.handleSubmit(async (v) => {
     await update.mutateAsync({ full_name: v.name, phone: v.phone || null });
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+    showFlash("profile");
   });
 
   const prefs = profile.data?.notification_prefs;
   const setPref = (key: "order_updates" | "promotions", value: boolean) =>
-    prefs && update.mutate({ notification_prefs: { ...prefs, [key]: value } });
+    prefs && update.mutate({ notification_prefs: { ...prefs, [key]: value } }, { onSuccess: () => showFlash("prefs") });
 
   return (
     <View style={{ gap: 24 }}>
@@ -82,13 +94,13 @@ function Account() {
       </Reveal>
 
       <Card style={{ gap: 14 }}>
-        <FormField control={form.control} name="name" label={t.name} autoComplete="name" />
-        <FormField control={form.control} name="phone" label={t.phone} keyboardType="phone-pad" autoComplete="tel" />
+        <FormField control={form.control} name="name" label={t.name} autoComplete="name" branded success={flash === "profile"} />
+        <FormField control={form.control} name="phone" label={t.phone} keyboardType="phone-pad" autoComplete="tel" branded success={flash === "profile"} />
         <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-          <Button label={t.save} onPress={() => save()} />
-          {saved && <Text accessibilityLiveRegion="polite" style={{ fontFamily: fonts.bold, color: colors.success }}>{t.saved}</Text>}
+          <Button label={flash === "profile" ? t.saved : t.save} variant={flash === "profile" ? "success" : "black"} loading={update.isPending && flash === null} onPress={() => save()} />
           {update.isError && <Text style={{ fontFamily: fonts.bold, color: colors.danger }}>{t.genericError}</Text>}
         </View>
+        {flash === "profile" && <SuccessBanner text={t.profileSaved} />}
       </Card>
 
       <View style={{ gap: 10 }}>
@@ -113,6 +125,7 @@ function Account() {
 
       <View style={{ gap: 10 }}>
         <Text accessibilityRole="header" style={{ fontFamily: fonts.bold, fontSize: 20, letterSpacing: -0.3, color: colors.black }}>{t.notifications}</Text>
+        {flash === "prefs" && <SuccessBanner text={t.prefsSaved} />}
         <Card style={{ paddingVertical: 4 }}>
           <ToggleRow label={t.notifOrders} value={prefs?.order_updates ?? true} onChange={(v) => setPref("order_updates", v)} />
           <ToggleRow label={t.notifPromos} value={prefs?.promotions ?? false} onChange={(v) => setPref("promotions", v)} />
@@ -139,6 +152,20 @@ function Account() {
         )}
       </View>
     </View>
+  );
+}
+
+function SuccessBanner({ text }: { text: string }) {
+  return (
+    <Animated.View
+      entering={FadeIn}
+      exiting={FadeOut}
+      accessibilityLiveRegion="polite"
+      style={{ flexDirection: "row", alignItems: "center", gap: 8, padding: 12, borderRadius: radius.md, backgroundColor: colors.successSoft, borderWidth: 1.5, borderColor: colors.success }}
+    >
+      <Ionicons name="checkmark-circle" size={20} color={colors.success} />
+      <Text style={{ flex: 1, fontFamily: fonts.bold, fontSize: 14, color: colors.success }}>{text}</Text>
+    </Animated.View>
   );
 }
 

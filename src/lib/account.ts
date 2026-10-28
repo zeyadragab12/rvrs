@@ -17,6 +17,17 @@ export type SavedAddress = {
   lat: number | null;
   lng: number | null;
 };
+
+export type AddressDetails = { building: string; floor: string; landmark: string };
+
+/** Building, floor and landmark live together in the address notes, which orders and the admin already show. */
+export const formatAddressNotes = (d: AddressDetails) => `Building ${d.building}, Floor ${d.floor}, Landmark: ${d.landmark}`;
+
+/** Reads notes written by formatAddressNotes. Older free-text notes do not match, so the customer fills the fields in. */
+export function parseAddressNotes(notes: string | null): AddressDetails | null {
+  const m = notes?.match(/^Building (.+), Floor (.+), Landmark: (.+)$/s);
+  return m ? { building: m[1], floor: m[2], landmark: m[3] } : null;
+}
 export type MyOrder = { id: string; order_number: string; status: string; total: number; created_at: string };
 
 export function useProfile() {

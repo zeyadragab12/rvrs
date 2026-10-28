@@ -50,7 +50,7 @@ function Slot({ index, filled, pending, newest }: { index: number; filled: boole
 }
 
 /** Stamp card: ten slots, and the eleventh order is free. Stamps come from completed orders. */
-export function LoyaltyCard() {
+export function LoyaltyCard({ onNavigate }: { onNavigate?: () => void }) {
   const { t } = useI18n();
   const { signedIn, loading, stamps, unlocked, rewardPending, remaining, pending, refetch } = useLoyalty();
   const ready = unlocked && !rewardPending;
@@ -68,7 +68,10 @@ export function LoyaltyCard() {
     <PressableScale
       accessibilityRole="button"
       accessibilityLabel={`${t.loyaltyTitle}. ${signedIn ? t.loyaltyCount(stamps) + ". " : ""}${label}`}
-      onPress={() => router.push(signedIn ? "/menu" : "/profile")}
+      onPress={() => {
+        onNavigate?.();
+        router.push(signedIn ? "/menu" : "/profile");
+      }}
       scaleTo={0.98}
       style={[{ backgroundColor: colors.black, borderRadius: radius.xl, padding: 20, gap: 18, overflow: "hidden" }, shadow.lift]}
     >

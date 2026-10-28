@@ -19,7 +19,7 @@ export function ProductRail({ category, products }: { category: Category; produc
         </Text>
         <PressableScale
           accessibilityRole="button"
-          onPress={() => router.push({ pathname: "/menu", params: { category: category.id } })}
+          onPress={() => router.navigate({ pathname: "/menu", params: { category: category.id } })}
           style={{ minHeight: 44, justifyContent: "center", paddingHorizontal: 4 }}
         >
           <Text style={{ fontFamily: fonts.bold, fontSize: 14, color: colors.orange }}>{t.seeAll}</Text>

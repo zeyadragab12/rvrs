@@ -1,11 +1,11 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { randomUUID } from "expo-crypto";
 import * as Location from "expo-location";
 import { router } from "expo-router";
 import { useEffect, useState } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { KeyboardAvoidingView, Platform, ScrollView, Switch, Text, TextInput, View } from "react-native";
 import Animated, { FadeIn } from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -19,13 +19,13 @@ import { Chip } from "@/components/ui/chip";
 import { ModalHeader } from "@/components/ui/modal-header";
 import { PressableScale } from "@/components/ui/pressable-scale";
 import { useI18n, type Strings } from "@/i18n";
-import { useAddresses, useProfile } from "@/lib/account";
+import { formatAddressNotes, parseAddressNotes, useAddresses, useProfile } from "@/lib/account";
 import { unitPrice, useCart } from "@/lib/cart";
 import { useFulfillment } from "@/lib/fulfillment";
 import { useLoyalty } from "@/lib/loyalty";
 import { saveGuestOrder } from "@/lib/guest-orders";
 import { useBranchStatus } from "@/lib/menu";
-import { createOrder } from "@/lib/orders";
+import { checkPromo, createOrder, getDeliveryQuote, type PromoCheck, type PromoReason } from "@/lib/orders";
 import { usePaymentSettings } from "@/lib/settings";
 import { colors, fonts, radius, shadow } from "@/theme/tokens";
 
@@ -34,11 +34,28 @@ const makeSchema = (t: Strings, delivery: boolean) =>
     name: z.string().trim().min(1, t.errName).max(100, t.errName),
     phone: z.string().trim().regex(/^\+?[0-9 ]{7,15}$/, t.errPhone),
     addressLine: delivery ? z.string().trim().min(3, t.errAddress).max(300) : z.string().max(300),
-    addressNotes: z.string().max(300),
+    building: delivery ? z.string().trim().min(1, t.errRequired).max(60) : z.string().max(60),
+    floor: delivery ? z.string().trim().min(1, t.errRequired).max(20) : z.string().max(20),
+    landmark: delivery ? z.string().trim().min(1, t.errRequired).max(120) : z.string().max(120),
     promo: z.string().trim().max(40),
     notes: z.string().max(500),
   });
 type Form = z.infer<ReturnType<typeof makeSchema>>;
+
+/** Customer-facing explanation for a refused promo code, in the customer's language. */
+function promoProblem(t: Strings, price: (n: number) => string, r: { reason?: string; date?: string; min_order?: number }) {
+  switch (r.reason) {
+    case "empty": return t.promoErrEmpty;
+    case "not_found": return t.promoErrNotFound;
+    case "not_started": return t.promoErrNotStarted(r.date ?? "");
+    case "expired": return t.promoErrExpired;
+    case "wrong_branch": return t.promoErrWrongBranch;
+    case "used_up": return t.promoErrUsedUp;
+    case "min_order": return t.promoErrMinOrder(price(Number(r.min_order ?? 0)));
+    case "not_applicable": return t.promoErrNotApplicable;
+    default: return null;
+  }
+}
 
 export default function Checkout() {
   const { t, pick, price } = useI18n();
@@ -59,15 +76,25 @@ export default function Checkout() {
   const [payment, setPayment] = useState<"cash" | "card">("cash");
   const [submitting, setSubmitting] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
+  const [promoResult, setPromoResult] = useState<{ code: string; result: PromoCheck } | null>(null);
+  const [promoBusy, setPromoBusy] = useState(false);
   // One key per checkout attempt. Reused on retry so a double tap or a dropped connection can't create two orders.
   const [idempotencyKey] = useState(() => randomUUID());
 
   const form = useForm<Form>({
     resolver: zodResolver(makeSchema(t, delivery)),
-    defaultValues: { name: "", phone: "", addressLine: "", addressNotes: "", promo: "", notes: "" },
+    defaultValues: { name: "", phone: "", addressLine: "", building: "", floor: "", landmark: "", promo: "", notes: "" },
     mode: "onTouched",
   });
 
+  // The server's real delivery fee for this branch and location, so the review shows it before the order is placed.
+  const quote = useQuery({
+    queryKey: ["delivery-quote", branch?.id, coords?.lat, coords?.lng],
+    enabled: delivery && !!branch && !!coords,
+    queryFn: () => getDeliveryQuote(branch!.id, coords!.lat, coords!.lng),
+    staleTime: 60_000,
+  });
+  const promoText = useWatch({ control: form.control, name: "promo" }); // follows typing so the Apply button and result stay in step
   const profile = useProfile();
   const saved = useAddresses();
   const { setValue, getValues } = form;
@@ -80,7 +107,10 @@ export default function Checkout() {
 
   const applySavedAddress = (a: NonNullable<typeof saved.data>[number]) => {
     setValue("addressLine", a.address_line, { shouldValidate: true });
-    setValue("addressNotes", a.notes ?? "");
+    const d = parseAddressNotes(a.notes);
+    setValue("building", d?.building ?? "", { shouldValidate: !!d });
+    setValue("floor", d?.floor ?? "", { shouldValidate: !!d });
+    setValue("landmark", d?.landmark ?? "", { shouldValidate: !!d });
     if (a.lat !== null && a.lng !== null) {
       setCoords({ lat: a.lat, lng: a.lng });
       setLocError(null);
@@ -108,9 +138,31 @@ export default function Checkout() {
     }
   };
 
+  const orderItems = cart.lines.map((l) => ({ product_id: l.productId, quantity: l.quantity, option_ids: l.options.map((o) => o.id), notes: l.notes || undefined }));
+
+  /** Asks the server about the typed code. Returns false only when the code is definitely refused. */
+  const verifyPromo = async (): Promise<boolean> => {
+    const code = form.getValues("promo").trim().toUpperCase();
+    if (!code || !branch) return true;
+    if (promoResult?.code === code) return promoResult.result.ok;
+    setPromoBusy(true);
+    try {
+      const result = await checkPromo(code, branch.id, orderItems);
+      setPromoResult({ code, result });
+      return result.ok;
+    } catch {
+      // Could not reach the server. Do not block the customer; the order itself is checked again when placed.
+      return true;
+    } finally {
+      setPromoBusy(false);
+    }
+  };
+
   const next = async () => {
+    setServerError(null);
+    if (step === 1 && !rewardOn && !(await verifyPromo())) return;
     if (step === 0) {
-      const ok = await form.trigger(delivery ? ["name", "phone", "addressLine"] : ["name", "phone"]);
+      const ok = await form.trigger(delivery ? ["name", "phone", "addressLine", "building", "floor", "landmark"] : ["name", "phone"]);
       if (delivery && !coords) setLocError(t.errLocation);
       if (!ok || (delivery && !coords)) return;
     }
@@ -125,12 +177,12 @@ export default function Checkout() {
       const res = await createOrder({
         branchId: branch.id,
         method: mode,
-        items: cart.lines.map((l) => ({ product_id: l.productId, quantity: l.quantity, option_ids: l.options.map((o) => o.id), notes: l.notes || undefined })),
+        items: orderItems,
         customerName: v.name,
         customerPhone: v.phone,
         paymentMethod: activePayment,
         idempotencyKey,
-        address: delivery && coords ? { address_line: v.addressLine, lat: coords.lat, lng: coords.lng, notes: v.addressNotes || undefined } : undefined,
+        address: delivery && coords ? { address_line: v.addressLine, lat: coords.lat, lng: coords.lng, notes: formatAddressNotes(v) } : undefined,
         promoCode: rewardOn ? undefined : v.promo || undefined,
         useReward: rewardOn,
         notes: v.notes || undefined,
@@ -141,7 +193,20 @@ export default function Checkout() {
       qc.invalidateQueries({ queryKey: ["my-orders"] });
       router.replace({ pathname: "/order/[id]", params: { id: res.order_id } });
     } catch (e) {
-      setServerError(e instanceof Error ? e.message : t.loadError);
+      // A refused promo code is explained in the customer's language and sends them back to fix it.
+      const hint = (e as { hint?: string } | null)?.hint;
+      const explained = hint ? promoProblem(t, price, { reason: hint }) : null;
+      if (explained) {
+        setPromoResult({ code: v.promo.trim().toUpperCase(), result: { ok: false, reason: hint as PromoReason } });
+        setStep(1);
+      }
+      // An address saved before building, floor and landmark were required has none of them. Send the customer back to add them.
+      const missingDetails = e instanceof Error && e.message.includes("building, floor and landmark");
+      if (missingDetails) {
+        setStep(0);
+        form.trigger(["building", "floor", "landmark"]);
+      }
+      setServerError(missingDetails ? t.errAddressDetails : (explained ?? (e instanceof Error ? e.message : t.loadError)));
       setSubmitting(false);
     }
   });
@@ -160,6 +225,12 @@ export default function Checkout() {
   );
 
   const v = form.getValues();
+    // Only show a promo result that belongs to the code currently typed.
+  const promoNow = promoResult && promoResult.code === promoText.trim().toUpperCase() ? promoResult : null;
+  // Shown only when every part is known. The server still recalculates the real total when the order is placed.
+  const discountNow = rewardOn ? Math.min(cart.subtotal, loyalty.cap) : promoNow?.result.ok ? (promoNow.result.discount ?? 0) : promoText.trim() ? null : 0;
+  const feeNow = delivery ? (quote.data?.ok ? (quote.data.fee ?? null) : null) : 0;
+  const estimatedTotal = discountNow === null || feeNow === null ? null : Math.max(0, cart.subtotal - discountNow) + feeNow;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.cream }}>
@@ -178,6 +249,7 @@ export default function Checkout() {
 
           {step === 0 && (
             <Animated.View key="s0" entering={FadeIn.duration(220)} style={{ gap: 16 }}>
+              {serverError && <Text accessibilityLiveRegion="assertive" style={{ fontFamily: fonts.bold, fontSize: 15, color: colors.danger }}>{serverError}</Text>}
               <ModeToggle />
               {field("name", t.name, { autoComplete: "name", textContentType: "name" })}
               {field("phone", t.phone, { keyboardType: "phone-pad", autoComplete: "tel", textContentType: "telephoneNumber" })}
@@ -194,7 +266,9 @@ export default function Checkout() {
                     </View>
                   )}
                   {field("addressLine", t.address, { autoComplete: "street-address", multiline: true })}
-                  {field("addressNotes", t.addressNotes)}
+                  {field("building", t.addressBuilding)}
+                  {field("floor", t.addressFloor)}
+                  {field("landmark", t.addressLandmark)}
                   <View style={{ gap: 6 }}>
                     <PressableScale
                       accessibilityRole="button"
@@ -259,6 +333,21 @@ export default function Checkout() {
                 <>
                   {field("promo", t.promo, { autoCapitalize: "characters", autoCorrect: false })}
                   <Text style={{ fontFamily: fonts.body, fontSize: 12, color: colors.gray, marginTop: -10 }}>{t.promoNote}</Text>
+                  {!!promoText.trim() && (
+                    <View style={{ gap: 8, alignItems: "flex-start" }}>
+                      <Button label={promoBusy ? t.promoChecking : t.promoApply} variant="ghost" loading={promoBusy} onPress={() => { setServerError(null); verifyPromo(); }} />
+                      {promoNow &&
+                        (promoNow.result.ok ? (
+                          <Text accessibilityLiveRegion="polite" style={{ fontFamily: fonts.bold, fontSize: 14, color: colors.success }}>
+                            {promoNow.result.discount ? t.promoApplied(price(promoNow.result.discount)) : t.promoAppliedNoAmount}
+                          </Text>
+                        ) : (
+                          <Text accessibilityLiveRegion="polite" style={{ fontFamily: fonts.bold, fontSize: 14, color: colors.danger }}>
+                            {promoProblem(t, price, promoNow.result) ?? t.promoErrUnknown}
+                          </Text>
+                        ))}
+                    </View>
+                  )}
                 </>
               )}
               {field("notes", t.orderNotes, { multiline: true, maxLength: 500 })}
@@ -279,9 +368,13 @@ export default function Checkout() {
                   </View>
                 ))}
                 <Row label={t.subtotal} value={price(cart.subtotal)} />
-                {delivery && <Row label={t.deliveryFee} value={t.setByServer} />}
-                {rewardOn ? <Row label={t.rewardApplied} value={`-${price(Math.min(cart.subtotal, loyalty.cap))}`} /> : !!v.promo && <Row label={t.discount} value={t.setByServer} />}
+                {delivery && <Row label={t.deliveryFee} value={quote.isPending ? t.feeLoading : quote.data?.ok && quote.data.fee !== undefined ? (quote.data.fee === 0 ? t.deliveryFree : price(quote.data.fee)) : t.setByServer} />}
+                {rewardOn ? <Row label={t.rewardApplied} value={`-${price(Math.min(cart.subtotal, loyalty.cap))}`} /> : !!v.promo && <Row label={t.discount} value={promoNow?.result.ok && promoNow.result.discount ? `-${price(promoNow.result.discount)}` : t.setByServer} />}
+                {estimatedTotal !== null && <Row label={t.total} value={price(estimatedTotal)} />}
               </Card>
+              {delivery && quote.data && !quote.data.ok && (
+                <Text accessibilityLiveRegion="polite" style={{ fontFamily: fonts.bold, fontSize: 14, color: colors.danger }}>{t.deliveryOutside}</Text>
+              )}
               <View style={{ gap: 4 }}>
                 <Text style={{ fontFamily: fonts.body, fontSize: 15, color: colors.black }}>{v.name} · {v.phone}</Text>
                 <Text style={{ fontFamily: fonts.body, fontSize: 15, color: colors.black }}>

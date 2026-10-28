@@ -34,5 +34,5 @@ export const shadow = {
   glow: { shadowColor: "#F15A24", shadowOpacity: 0.35, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 8 },
 } as const;
 
-/** Height of the floating tab bar plus its gap. Tab screens pad their scroll content by this much. */
-export const tabBarSpace = 108;
+/** Height of the floating tab bar plus breathing room. Tab screens pad their scroll content by this much. */
+export const tabBarSpace = 88;

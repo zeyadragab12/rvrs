@@ -49,8 +49,28 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
     // Only sent when used, so ordinary checkouts keep working even before the reward migration is applied.
     ...(input.useReward ? { p_use_reward: true } : {}),
   });
-  if (error) throw new Error(error.message);
+  // The database sends a reason code as the error hint when a promo code is refused, so the app can explain it in the customer's language.
+  if (error) throw Object.assign(new Error(error.message), { hint: error.hint });
   return data as CreateOrderResult;
+}
+
+export type DeliveryQuote = { ok: boolean; reason?: "outside_area" | "delivery_unavailable"; fee?: number; min_order?: number; zone?: string };
+
+/** The delivery fee the server will charge for this branch and location. Read-only; the order recalculates it. */
+export async function getDeliveryQuote(branchId: string, lat: number, lng: number): Promise<DeliveryQuote> {
+  const { data, error } = await supabase.rpc("delivery_quote", { p_branch_id: branchId, p_lat: lat, p_lng: lng });
+  if (error) throw new Error(error.message);
+  return data as DeliveryQuote;
+}
+
+export type PromoReason = "empty" | "not_found" | "not_started" | "expired" | "wrong_branch" | "used_up" | "min_order" | "not_applicable";
+export type PromoCheck = { ok: boolean; reason?: PromoReason; message?: string; date?: string; min_order?: number; discount?: number };
+
+/** Asks the server whether a code works for this cart and branch. Nothing is used up; the real check still runs when the order is placed. */
+export async function checkPromo(code: string, branchId: string, items: CartLine[]): Promise<PromoCheck> {
+  const { data, error } = await supabase.rpc("check_promo", { p_code: code, p_branch_id: branchId, p_items: items });
+  if (error) throw new Error(error.message);
+  return data as PromoCheck;
 }
 
 export async function getGuestOrder(orderId: string, token: string) {

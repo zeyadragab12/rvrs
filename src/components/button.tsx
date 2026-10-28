@@ -5,7 +5,7 @@ import { colors, fonts, radius, shadow, touch } from "@/theme/tokens";
 type Props = {
   label: string;
   onPress: () => void;
-  variant?: "black" | "orange" | "ghost";
+  variant?: "black" | "orange" | "ghost" | "success";
   disabled?: boolean;
   loading?: boolean;
   /** Stretch to the full row. */
@@ -13,7 +13,7 @@ type Props = {
 };
 
 export function Button({ label, onPress, variant = "black", disabled = false, loading = false, block = false }: Props) {
-  const bg = variant === "black" ? colors.black : variant === "orange" ? colors.orange : colors.white;
+  const bg = variant === "black" ? colors.black : variant === "orange" ? colors.orange : variant === "success" ? colors.success : colors.white;
   const fg = variant === "ghost" ? colors.black : variant === "black" ? colors.cream : colors.white;
   const inactive = disabled || loading;
   return (

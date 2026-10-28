@@ -39,6 +39,15 @@ Payment status is separate: unpaid, pending, paid, failed, refund pending, parti
 
 Requirements: Node 20 or newer, a Supabase project, and for phones an Android emulator, iOS simulator or a development build.
 
+### On a new computer
+The `.env.example` files already hold the project's public Supabase values, so a fresh clone runs with no extra setup:
+```bash
+git clone https://github.com/zeyadragab12/rvrs.git && cd rvrs
+npm ci && cp .env.example .env.local && npx expo start
+cd admin && npm ci && cp .env.example .env.local && npm run dev
+```
+`npm ci` installs the exact versions in the lockfiles. Phones running a development build need it rebuilt (`npx eas-cli@latest build --profile development`) or reinstalled once.
+
 ### Customer app
 ```bash
 npm install
